@@ -1,1 +1,1 @@
-Readme goes here. (Soon:TM:)
+Readme goes here. (Soon<sup>TM</sup>)
