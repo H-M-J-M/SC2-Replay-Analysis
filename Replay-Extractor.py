@@ -211,13 +211,20 @@ if __name__ == "__main__":
         logger.info("No replays found or no new replays to process.")
     else:
         logger.info(f"Found {len(replay_paths_to_process)} replay(s) to process.")
-        for rp in replay_paths_to_process:
-            absolute_path = rp.resolve()
-            if absolute_path.is_file():
+        print("\nPress Ctrl+C to abort batch at any time.")
+        try:
+            for rp in replay_paths_to_process:
                 try:
-                    logger.info(f"Processing {absolute_path.name}...")
-                    extract_replay(absolute_path)
+                    absolute_path = rp.resolve()
+                    if absolute_path.is_file():
+                        logger.info(f"Processing {absolute_path.name}...")
+                        extract_replay(absolute_path)
+                    else:
+                        logger.error(f"Replay file not found at path: {absolute_path}")
                 except Exception as e:
-                    logger.error(f"Failed to process replay {absolute_path.name}. Error: {e}")
-            else:
-                logger.error(f"Replay file not found at path: {absolute_path}")
+                    # Log error for a single replay and continue
+                    logger.error(f"Failed to process replay {rp.name}. Error: {e}")
+        except KeyboardInterrupt:
+            # Handle user pressing Ctrl+C
+            logger.info("Script interrupted by user. Exiting.")
+            exit()
