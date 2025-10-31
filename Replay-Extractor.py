@@ -10,6 +10,7 @@ from loguru import logger
 from sc2.main import run_replay
 from sc2.observer_ai import ObserverAI
 from sc2.data import Race
+from sc2.sc2process import KillSwitch
 
 
 DATA_INTERVAL = 20  #Time between data records (in game steps)
@@ -211,20 +212,23 @@ if __name__ == "__main__":
         logger.info("No replays found or no new replays to process.")
     else:
         logger.info(f"Found {len(replay_paths_to_process)} replay(s) to process.")
-        print("\nPress Ctrl+C to abort batch at any time.")
-        try:
-            for rp in replay_paths_to_process:
-                try:
-                    absolute_path = rp.resolve()
-                    if absolute_path.is_file():
-                        logger.info(f"Processing {absolute_path.name}...")
-                        extract_replay(absolute_path)
-                    else:
-                        logger.error(f"Replay file not found at path: {absolute_path}")
-                except Exception as e:
-                    # Log error for a single replay and continue
-                    logger.error(f"Failed to process replay {rp.name}. Error: {e}")
-        except KeyboardInterrupt:
-            # Handle user pressing Ctrl+C
-            logger.info("Script interrupted by user. Exiting.")
-            exit()
+        print("\nTo halt batch early, create a file named 'STOP' in the project directory.")
+        
+        stop_file_path = Path("STOP")
+
+        for rp in replay_paths_to_process:
+            if stop_file_path.exists():
+                logger.info("'STOP' file detected. Aborting batch process.")
+                stop_file_path.unlink() # Clean up the stop file
+                break # Exit the loop
+
+            try:
+                absolute_path = rp.resolve()
+                if absolute_path.is_file():
+                    logger.info(f"Processing {absolute_path.name}...")
+                    extract_replay(absolute_path)
+                else:
+                    logger.error(f"Replay file not found at path: {absolute_path}")
+            except Exception as e:
+                # Log error for a single replay (e.g. client crash) and continue
+                logger.error(f"Failed to process replay {rp.name}. Error: {e}")
