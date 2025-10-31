@@ -143,7 +143,7 @@ def extract_replay(rpath):
     run_replay(observer_2, replay_path=str(rpath), observed_id=2)
 
 if __name__ == "__main__":
-    logger.add("replay_extractor.log", rotation="5 MB", format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
+    logger.add("replay_extractor.log", level="INFO", rotation="5 MB", retention=5, format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
     parser = argparse.ArgumentParser(
         description="""A python tool for extracting game data from a starcraft 2 replay."""
     )
