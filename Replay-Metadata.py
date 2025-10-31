@@ -23,7 +23,7 @@ def get_replay_info(replay_path: str | Path, output_path: Path | None = None):
             print(json.dumps(metadata, indent=4))
 
 if __name__ == "__main__":
-    logger.add("replay_info.log", level="INFO", rotation="5 MB", retention=5, format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}", enqueue=True)
+    logger.add("replay_metadata.log", level="INFO", rotation="5 MB", retention=5, format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}", enqueue=True)
     parser = argparse.ArgumentParser(
         description="A python tool for extracting game metadata from a starcraft 2 replay."
     )

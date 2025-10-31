@@ -1,40 +1,26 @@
-# Replay Extractor Usage
+# Py Replay Analysis
 
-Extracts detailed unit data from StarCraft II replay files. Processes both player's perspectives separately in parallel (this can be disabled).
+A collection of Python scripts for analyzing StarCraft II replay files.
 
-## Synopsis
+## Scripts
 
-`py Replay-Extractor.py [replay_identifier] [options]`
+*   **`Replay-Extractor.py`**: Extracts detailed unit and game state data from replay files into CSV format.
+*   **`Replay-Metadata.py`**: Extracts and displays game metadata from replay files.
 
-## Description
+## Quick Start
 
-This script can be run in two modes:
+To process all new replays with default settings:
 
-*   **Batch Mode:** Run without a `replay_identifier` to process all new replays in the `Replays/` directory.
-    *   **To Stop Early:** Create an empty file named `STOP` in the project root. The script will abort before starting the next replay. To exit immediately, create the `STOP` file and then press `Ctrl+C` in the command line.
+```sh
+py Replay-Extractor.py
+```
 
-*   **Single Replay Mode:** Provide a `replay_identifier` to process one replay. This can be a match ID (`4309642`), filename, or full path.
+To get metadata for a specific replay:
 
-## Options
+```sh
+py Replay-Metadata.py 4309642
+```
 
-*   `-s, --start SECONDS`: Time (seconds) to start recording. Default: `0`.
-*   `-e, --end SECONDS`: Time (seconds) to stop recording. Default: `7200`.
-*   `-i, --interval STEPS`: Game steps between records. Default: `20`.
-*   `--single-thread`: Run extraction in a single thread. (Default is parallel).
+## Documentation
 
-## Examples
-
-*   **Process all new replays:**
-    ```sh
-    py Replay-Extractor.py
-    ```
-
-*   **Process a specific replay by ID with a custom time window:**
-    ```sh
-    py Replay-Extractor.py 4309642 -s 120 -e 300
-    ```
-
-*   **Process a replay using only a single thread:**
-    ```sh
-    py Replay-Extractor.py 4309642 --single-thread
-    ```
+For detailed usage, options, and examples for each script, please refer to the documentation in the `docs/` directory.
