@@ -30,7 +30,7 @@ class ObserverBot(ObserverAI):
         self.interval = interval
 
     def _prepare_step(self, state, proto_game_info):
-        self.race = Race.Terran #not sure why this is needed, but the program will crash without it.
+        self.race = Race.Terran #not sure why this is needed, but the program will crash without it. # pyright: ignore[reportAttributeAccessIssue] 
         super()._prepare_step(state, proto_game_info)
 
     async def on_start(self):
