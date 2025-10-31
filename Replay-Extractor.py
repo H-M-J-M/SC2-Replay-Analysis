@@ -28,7 +28,7 @@ class ObserverBot(ObserverAI):
         super()._prepare_step(state, proto_game_info)
 
     async def on_start(self):
-        print(f"Replay on_start() was called for observed_id={self.observed_id}")
+        pass
 
     async def on_step(self, iteration: int):
         if self.time > DATA_END_TIME:
@@ -66,7 +66,7 @@ class ObserverBot(ObserverAI):
 
     async def on_end(self, game_result):
         if not self.unit_data:
-            print("No unit data to write.")
+            logger.warning(f"No unit data to write for POV = player {self.observed_id} in replay '{Path(self.replay_path).name}'. This may be due to an incorrect time window.")
             return
 
         # Group data by player_id
@@ -105,7 +105,7 @@ class ObserverBot(ObserverAI):
                 writer = csv.DictWriter(f, fieldnames=data[0].keys())
                 writer.writeheader()
                 writer.writerows(data)
-            print(f"Successfully wrote unit data for player {player_id} to {output_file}")
+            logger.info(f"Successfully wrote unit data for player {player_id} to {output_file}")
 
     async def on_unit_destroyed(self, unit_tag):
         pass
@@ -143,14 +143,15 @@ def extract_replay(rpath):
     run_replay(observer_2, replay_path=str(rpath), observed_id=2)
 
 if __name__ == "__main__":
+    logger.add("replay_extractor.log", rotation="5 MB", format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
     parser = argparse.ArgumentParser(
         description="""A python tool for extracting game data from a starcraft 2 replay."""
     )
 
     parser.add_argument("replay", nargs='?', default=None, type=str, help="The replay number, filename, or full path. If omitted, all new replays will be processed.")
-    parser.add_argument("-s", "--start", help="The in-game time to start logging data (in seconds).", default=0, type=int)
-    parser.add_argument("-e", "--end", help="The in-game time to stop logging and end the replay (in seconds).", default=7200, type=int)
-    parser.add_argument("-i", "--interval", help="The time between log entries (in game steps).", default=20, type=int)
+    parser.add_argument("-s", "--start", help="The in-game time to start recording data (in seconds).", default=0, type=int)
+    parser.add_argument("-e", "--end", help="The in-game time to stop recording and end the replay (in seconds).", default=7200, type=int)
+    parser.add_argument("-i", "--interval", help="The time between record entries (in game steps).", default=20, type=int)
     args = parser.parse_args()
     DATA_START_TIME = args.start
     DATA_END_TIME = args.end
@@ -194,7 +195,7 @@ if __name__ == "__main__":
         if not replays_dir.is_dir():
             logger.error("The 'Replays' directory was not found.")
             exit()
-        output_dir.mkdir(exist_ok=True) # Creates Output if needed
+        output_dir.mkdir(exist_ok=True) # Creates /Output/ if needed
 
         preexisting_outputs = {d.name for d in output_dir.iterdir() if d.is_dir()}
         
