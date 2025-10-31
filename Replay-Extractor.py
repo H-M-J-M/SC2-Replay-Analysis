@@ -1,5 +1,8 @@
 import platform
+import os
+import re
 import csv
+import argparse
 from pathlib import Path
 
 from loguru import logger
@@ -11,7 +14,7 @@ from sc2.data import Race
 
 DATA_INTERVAL = 20  #Time between data records (in game steps)
 DATA_START_TIME = 0 #Time to start gathering data (in seconds)
-DATA_END_TIME = 120 #Time to stop gathering data (in seconds)
+DATA_END_TIME = 7200 #Time to stop gathering data (in seconds)
 
 class ObserverBot(ObserverAI):
     def __init__(self, replay_path, observed_id):
@@ -131,27 +134,89 @@ class ObserverBot(ObserverAI):
     async def on_enemy_unit_left_vision(self, unit_tag):
         pass
 
-if __name__ == "__main__":
-    replay_name = "Replays/4299043_Xena_negativeZero_LeyLinesAIE_v3.SC2Replay"
-    if platform.system() == "Linux":
-        home_replay_folder = Path.home() / "Documents" / "StarCraft II" / "Replays"
-        replay_path = home_replay_folder / replay_name
-        if not replay_path.is_file():
-            logger.warning(f"You are on linux, please put the replay in directory {home_replay_folder} (untested)")
-            raise FileNotFoundError
-    elif Path(replay_name).is_absolute():
-        replay_path = Path(replay_name)
-    else:
-        folder_path = Path(__file__).parent
-        replay_path = folder_path / replay_name
-    assert replay_path.is_file(), (
-        "Replay not found. Put an SC2Replay file in the Replays folder, then run again."
-    )
-    
-    # Run analysis for Player 1's perspective
-    observer_1 = ObserverBot(replay_path, observed_id=1)
-    run_replay(observer_1, replay_path=str(replay_path), observed_id=1)
+def extract_replay(rpath):
+     # Get Player 1's perspective
+    observer_1 = ObserverBot(rpath, observed_id=1)
+    run_replay(observer_1, replay_path=str(rpath), observed_id=1)
+    # Get Player 2's perspective
+    observer_2 = ObserverBot(rpath, observed_id=2)
+    run_replay(observer_2, replay_path=str(rpath), observed_id=2)
 
-    # Run analysis for Player 2's perspective
-    observer_2 = ObserverBot(replay_path, observed_id=2)
-    run_replay(observer_2, replay_path=str(replay_path), observed_id=2)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="""A python tool for extracting game data from a starcraft 2 replay."""
+    )
+
+    parser.add_argument("replay", nargs='?', default=None, type=str, help="The replay number, filename, or full path. If omitted, all new replays will be processed.")
+    parser.add_argument("-s", "--start", help="The in-game time to start logging data (in seconds).", default=0, type=int)
+    parser.add_argument("-e", "--end", help="The in-game time to stop logging and end the replay (in seconds).", default=7200, type=int)
+    parser.add_argument("-i", "--interval", help="The time between log entries (in game steps).", default=20, type=int)
+    args = parser.parse_args()
+    DATA_START_TIME = args.start
+    DATA_END_TIME = args.end
+    DATA_INTERVAL = args.interval
+
+
+    replay_paths_to_process = []
+
+    if args.replay:
+        # Single replay processing
+        replay_path = None
+        
+        # Absolute path
+        if Path(args.replay).is_absolute():
+            replay_path = Path(args.replay)
+        # AIArena match ID
+        elif args.replay.isdigit():
+            replays_dir = Path("Replays")
+            if replays_dir.is_dir():
+                match_pattern = f"{args.replay}_*.SC2Replay"
+                found_files = list(replays_dir.glob(match_pattern))
+                if len(found_files) == 1:
+                    replay_path = found_files[0]
+                elif len(found_files) > 1:
+                    logger.error(f"Multiple replays found for number '{args.replay}'. Please use a more specific name.")
+        # Full filename
+        elif ".SC2Replay" in args.replay:
+            replay_path = Path("Replays") / args.replay
+        
+        else:
+            logger.warning(f"Invalid replay identifier: '{args.replay}'")
+
+        if replay_path:
+            replay_paths_to_process.append(replay_path)
+
+    else:
+        # No replay specified, so analyze all new replays
+        replays_dir = Path("Replays")
+        output_dir = Path("Output")
+        
+        if not replays_dir.is_dir():
+            logger.error("The 'Replays' directory was not found.")
+            exit()
+        output_dir.mkdir(exist_ok=True) # Creates Output if needed
+
+        preexisting_outputs = {d.name for d in output_dir.iterdir() if d.is_dir()}
+        
+        for replay_file in replays_dir.glob("*.SC2Replay"):
+            match = re.search(r"^(\d+)_", replay_file.name)
+            if match:
+                game_num = match.group(1)
+                if game_num not in preexisting_outputs:
+                    replay_paths_to_process.append(replay_file)
+
+    # Process all collected paths
+    if not replay_paths_to_process:
+        logger.info("No replays found or no new replays to process.")
+    else:
+        logger.info(f"Found {len(replay_paths_to_process)} replay(s) to process.")
+        for rp in replay_paths_to_process:
+            absolute_path = rp.resolve()
+            if absolute_path.is_file():
+                try:
+                    logger.info(f"Processing {absolute_path.name}...")
+                    extract_replay(absolute_path)
+                except Exception as e:
+                    logger.error(f"Failed to process replay {absolute_path.name}. Error: {e}")
+            else:
+                logger.error(f"Replay file not found at path: {absolute_path}")
