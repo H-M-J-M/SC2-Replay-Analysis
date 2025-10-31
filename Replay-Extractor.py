@@ -3,26 +3,31 @@ import os
 import re
 import csv
 import argparse
+import asyncio
+import multiprocessing
 from pathlib import Path
 
 from loguru import logger
 
-from sc2.main import run_replay
+from sc2.main import run_replay, _play_replay, get_replay_version
 from sc2.observer_ai import ObserverAI
 from sc2.data import Race
-from sc2.sc2process import KillSwitch
+from sc2.sc2process import KillSwitch, SC2Process
+from sc2.client import Client
 
 
-DATA_INTERVAL = 20  #Time between data records (in game steps)
-DATA_START_TIME = 0 #Time to start gathering data (in seconds)
-DATA_END_TIME = 7200 #Time to stop gathering data (in seconds)
+from sc2.protocol import ProtocolError
+
 
 class ObserverBot(ObserverAI):
-    def __init__(self, replay_path, observed_id):
+    def __init__(self, replay_path, observed_id, start_time=0, end_time=7200, interval=20):
         super().__init__()
         self.unit_data = []
         self.replay_path = replay_path
         self.observed_id = observed_id
+        self.start_time = start_time
+        self.end_time = end_time
+        self.interval = interval
 
     def _prepare_step(self, state, proto_game_info):
         self.race = Race.Terran #not sure why this is needed, but the program will crash without it.
@@ -32,14 +37,14 @@ class ObserverBot(ObserverAI):
         pass
 
     async def on_step(self, iteration: int):
-        if self.time > DATA_END_TIME:
+        if self.time > self.end_time:
             await self.client.leave()
             return
 
-        if self.time < DATA_START_TIME:
+        if self.time < self.start_time:
             return
         
-        if iteration % DATA_INTERVAL != 0:
+        if iteration % self.interval != 0:
             return
 
         for unit in self.all_units:
@@ -141,29 +146,63 @@ def save_data_from_bot(bot: ObserverBot):
                 writer.writerows(data)
             logger.info(f"Successfully wrote unit data for player {player_id} to {output_file}")
 
-def extract_replay(rpath):
+async def process_perspective(replay_path, observed_id, port, base_build, data_version, start_time, end_time, interval, placement=None):
+    """Processes a single player's perspective of a replay using a specific port."""
+    bot = ObserverBot(replay_path, observed_id=observed_id, start_time=start_time, end_time=end_time, interval=interval)
+    try:
+        async with SC2Process(port=port, base_build=base_build, data_hash=data_version, placement=placement) as server:
+            await server.ping()
+            client = Client(server._ws)
+            await server.start_replay(
+                replay_path=str(replay_path),
+                realtime=False,
+                observed_id=observed_id
+            )
+            await _play_replay(client, bot, realtime=False, player_id=observed_id)
+    except ProtocolError as e:
+        # This is expected when the replay ends.
+        if "Game over" in str(e):
+            pass
+        else:
+            logger.error(f"Caught unexpected ProtocolError in process_perspective: {e}")
+    except Exception as e:
+        logger.error(f"Caught exception in process_perspective: {e}")
+    finally:
+        save_data_from_bot(bot)
+
+def process_perspective_wrapper(replay_path, observed_id, port, base_build, data_version, start_time, end_time, interval, placement=None):
+    """Synchronous wrapper to run the async process_perspective function for multiprocessing."""
+    try:
+        asyncio.run(process_perspective(replay_path, observed_id, port, base_build, data_version, start_time, end_time, interval, placement))
+    except Exception as e:
+        logger.error(f"Error in process for player {observed_id} on port {port}: {e}")
+
+def extract_replay(rpath, start_time, end_time, interval):
     # Get Player 1's perspective
-    observer_1 = ObserverBot(rpath, observed_id=1)
+    observer_1 = ObserverBot(rpath, observed_id=1, start_time=start_time, end_time=end_time, interval=interval)
     try:
         run_replay(observer_1, replay_path=str(rpath), observed_id=1)
     except Exception:
-        # This is expected when the replay ends before DATA_END_TIME.
+        # This is expected when the replay ends before the specified end_time.
         pass
     finally:
         save_data_from_bot(observer_1)
 
     # Get Player 2's perspective
-    observer_2 = ObserverBot(rpath, observed_id=2)
+    observer_2 = ObserverBot(rpath, observed_id=2, start_time=start_time, end_time=end_time, interval=interval)
     try:
         run_replay(observer_2, replay_path=str(rpath), observed_id=2)
     except Exception:
-        # This is expected when the replay ends before DATA_END_TIME.
+        # This is expected when the replay ends before the specified end_time.
         pass
     finally:
         save_data_from_bot(observer_2)
 
 if __name__ == "__main__":
-    logger.add("replay_extractor.log", level="INFO", rotation="5 MB", retention=5, format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
+    # On Windows, multiprocessing requires this protection.
+    multiprocessing.freeze_support()
+
+    logger.add("replay_extractor.log", level="INFO", rotation="5 MB", retention=5, format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}", enqueue=True)
     parser = argparse.ArgumentParser(
         description="""A python tool for extracting game data from a starcraft 2 replay."""
     )
@@ -172,11 +211,8 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--start", help="The in-game time to start recording data (in seconds).", default=0, type=int)
     parser.add_argument("-e", "--end", help="The in-game time to stop recording and end the replay (in seconds).", default=7200, type=int)
     parser.add_argument("-i", "--interval", help="The time between record entries (in game steps).", default=20, type=int)
+    parser.add_argument("--single-thread", help="Run the extraction in a single thread instead of in parallel.", action="store_true")
     args = parser.parse_args()
-    DATA_START_TIME = args.start
-    DATA_END_TIME = args.end
-    DATA_INTERVAL = args.interval
-
 
     replay_paths_to_process = []
 
@@ -243,11 +279,38 @@ if __name__ == "__main__":
 
             try:
                 absolute_path = rp.resolve()
-                if absolute_path.is_file():
-                    logger.info(f"Processing {absolute_path.name}...")
-                    extract_replay(absolute_path)
-                else:
+                if not absolute_path.is_file():
                     logger.error(f"Replay file not found at path: {absolute_path}")
+                    continue
+                
+                logger.info(f"Processing {absolute_path.name}...")
+
+                if args.single_thread:
+                    logger.info("Running in single-threaded mode.")
+                    extract_replay(absolute_path, args.start, args.end, args.interval)
+                else:
+                    logger.info("Running in parallel mode.")
+                    try:
+                        base_build, data_version = get_replay_version(absolute_path)
+                    except Exception as e:
+                        logger.error(f"Could not get replay version for {absolute_path.name}: {e}")
+                        continue
+
+                    port1 = 5001
+                    port2 = 5002
+                    placement1 = (0, 0)
+                    placement2 = (960, 0)
+                    p1_args = (absolute_path, 1, port1, base_build, data_version, args.start, args.end, args.interval, placement1)
+                    p2_args = (absolute_path, 2, port2, base_build, data_version, args.start, args.end, args.interval, placement2)
+                    p1 = multiprocessing.Process(target=process_perspective_wrapper, args=p1_args)
+                    p2 = multiprocessing.Process(target=process_perspective_wrapper, args=p2_args)
+                    
+                    p1.start()
+                    p2.start()
+                    
+                    p1.join()
+                    p2.join()
+
             except Exception as e:
                 # Log error for a single replay (e.g. client crash) and continue
                 logger.error(f"Failed to process replay {rp.name}. Error: {e}")

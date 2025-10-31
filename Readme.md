@@ -1,6 +1,6 @@
 # Replay Extractor Usage
 
-Extracts detailed unit data from StarCraft II replay files.
+Extracts detailed unit data from StarCraft II replay files. Processes both player's perspectives separately in parallel (this can be disabled).
 
 ## Synopsis
 
@@ -20,6 +20,7 @@ This script can be run in two modes:
 *   `-s, --start SECONDS`: Time (seconds) to start recording. Default: `0`.
 *   `-e, --end SECONDS`: Time (seconds) to stop recording. Default: `7200`.
 *   `-i, --interval STEPS`: Game steps between records. Default: `20`.
+*   `--single-thread`: Run extraction in a single thread. (Default is parallel).
 
 ## Examples
 
@@ -31,4 +32,9 @@ This script can be run in two modes:
 *   **Process a specific replay by ID with a custom time window:**
     ```sh
     py Replay-Extractor.py 4309642 -s 120 -e 300
+    ```
+
+*   **Process a replay using only a single thread:**
+    ```sh
+    py Replay-Extractor.py 4309642 --single-thread
     ```
