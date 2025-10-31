@@ -66,47 +66,8 @@ class ObserverBot(ObserverAI):
             )
 
     async def on_end(self, game_result):
-        if not self.unit_data:
-            logger.warning(f"No unit data to write for POV = player {self.observed_id} in replay '{Path(self.replay_path).name}'. This may be due to an incorrect time window.")
-            return
-
-        # Group data by player_id
-        player_data = {}
-        for row in self.unit_data:
-            player_id = row["player_id"]
-            if player_id not in player_data:
-                player_data[player_id] = []
-            player_data[player_id].append(row)
-
-        replay_name_parts = Path(self.replay_path).stem.split("_")
-        game_number = replay_name_parts[0]
-        player_1_name = replay_name_parts[1]
-        player_2_name = replay_name_parts[2]
-        map_name = "_".join(replay_name_parts[3:])
-        
-        observer_name = player_1_name if self.observed_id == 1 else player_2_name
-
-        output_dir = Path("Output") / game_number
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        for player_id, data in player_data.items():
-
-            if player_id in [1, 2]:
-                player_name = player_1_name if player_id == 1 else player_2_name
-                if player_id == self.observed_id:
-                    output_filename = f"{game_number}_{player_name}_{map_name}_ground-truth.csv"
-                else:
-                    output_filename = f"{game_number}_{player_name}_{map_name}_observed-by-{observer_name}.csv"
-            else:
-                output_filename = f"{game_number}_player-id-{player_id}_{map_name}_observed-by-{observer_name}.csv" #These are (probably) neutral objects on the map (e.g., minerals).
-            
-            output_file = output_dir / output_filename
-
-            with open(output_file, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=data[0].keys())
-                writer.writeheader()
-                writer.writerows(data)
-            logger.info(f"Successfully wrote unit data for player {player_id} to {output_file}")
+        # This callback is unreliable when the game ends by reaching the end of a replay file.
+        pass
 
     async def on_unit_destroyed(self, unit_tag):
         pass
@@ -135,13 +96,71 @@ class ObserverBot(ObserverAI):
     async def on_enemy_unit_left_vision(self, unit_tag):
         pass
 
+def save_data_from_bot(bot: ObserverBot):
+    if not bot.unit_data:
+        logger.warning(f"No unit data to write for POV = player {bot.observed_id} in replay '{Path(bot.replay_path).name}'. This may be due to an incorrect time window.")
+        return
+
+    # Group data by player_id
+    player_data = {}
+    for row in bot.unit_data:
+        player_id = row["player_id"]
+        if player_id not in player_data:
+            player_data[player_id] = []
+        player_data[player_id].append(row)
+
+    replay_name_parts = Path(bot.replay_path).stem.split("_")
+    game_number = replay_name_parts[0]
+    player_1_name = replay_name_parts[1]
+    player_2_name = replay_name_parts[2]
+    map_name = "_".join(replay_name_parts[3:])
+    
+    observer_name = player_1_name if bot.observed_id == 1 else player_2_name
+
+    output_dir = Path("Output") / game_number
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for player_id, data in player_data.items():
+
+        if player_id in [1, 2]:
+            player_name = player_1_name if player_id == 1 else player_2_name
+            if player_id == bot.observed_id:
+                output_filename = f"{game_number}_{player_name}_{map_name}_ground-truth.csv"
+            else:
+                output_filename = f"{game_number}_{player_name}_{map_name}_observed-by-{observer_name}.csv"
+        else:
+            output_filename = f"{game_number}_player-id-{player_id}_{map_name}_observed-by-{observer_name}.csv" #These are (probably) neutral objects on the map (e.g., minerals).
+        
+        output_file = output_dir / output_filename
+
+        # Check if data is not empty before writing
+        if data:
+            with open(output_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            logger.info(f"Successfully wrote unit data for player {player_id} to {output_file}")
+
 def extract_replay(rpath):
-     # Get Player 1's perspective
+    # Get Player 1's perspective
     observer_1 = ObserverBot(rpath, observed_id=1)
-    run_replay(observer_1, replay_path=str(rpath), observed_id=1)
+    try:
+        run_replay(observer_1, replay_path=str(rpath), observed_id=1)
+    except Exception:
+        # This is expected when the replay ends before DATA_END_TIME.
+        pass
+    finally:
+        save_data_from_bot(observer_1)
+
     # Get Player 2's perspective
     observer_2 = ObserverBot(rpath, observed_id=2)
-    run_replay(observer_2, replay_path=str(rpath), observed_id=2)
+    try:
+        run_replay(observer_2, replay_path=str(rpath), observed_id=2)
+    except Exception:
+        # This is expected when the replay ends before DATA_END_TIME.
+        pass
+    finally:
+        save_data_from_bot(observer_2)
 
 if __name__ == "__main__":
     logger.add("replay_extractor.log", level="INFO", rotation="5 MB", retention=5, format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
@@ -220,7 +239,7 @@ if __name__ == "__main__":
             if stop_file_path.exists():
                 logger.info("'STOP' file detected. Aborting batch process.")
                 stop_file_path.unlink() # Clean up the stop file
-                break # Exit the loop
+                break # Exit the batch processing loop
 
             try:
                 absolute_path = rp.resolve()
