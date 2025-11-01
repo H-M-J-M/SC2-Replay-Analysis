@@ -1,3 +1,5 @@
+import json
+import uuid
 import platform
 import os
 import re
@@ -22,19 +24,27 @@ from sc2.protocol import ProtocolError
 class ObserverBot(ObserverAI):
     def __init__(self, replay_path, observed_id, start_time=0, end_time=7200, interval=20):
         super().__init__()
-        self.unit_data = []
         self.replay_path = replay_path
         self.observed_id = observed_id
         self.start_time = start_time
         self.end_time = end_time
         self.interval = interval
 
+        self.output_dir = Path("Output")
+        self.temp_file = None
+        self.csv_writer = None
+        self.temp_file_path = None
+        self.temp_schema_path = None
+
     def _prepare_step(self, state, proto_game_info):
         self.race = Race.Terran #not sure why this is needed, but the program will crash without it. # pyright: ignore[reportAttributeAccessIssue] 
         super()._prepare_step(state, proto_game_info)
 
     async def on_start(self):
-        pass
+        game_number = Path(self.replay_path).stem.split("_")[0]
+        temp_dir = self.output_dir / game_number
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_file_path = temp_dir / f"temp_{uuid.uuid4()}.csv"
 
     async def on_step(self, iteration: int):
         if self.time > self.end_time:
@@ -54,24 +64,42 @@ class ObserverBot(ObserverAI):
             except AttributeError:
                 owner = 0
 
-            self.unit_data.append(
-                {
-                    "timestamp": self.time,
-                    "unit_tag": unit.tag,
-                    "unit_type": unit.type_id.name,
-                    "player_id": owner,
-                    "position_x": unit.position.x,
-                    "position_y": unit.position.y,
-                    "health": unit.health,
-                    "shield": unit.shield,
-                    "energy": unit.energy,
-                    "build_progress": unit.build_progress,
-                    "resource_remaining": unit.mineral_contents if unit.is_mineral_field  else (unit.vespene_contents if unit.is_vespene_geyser else 0),
-                }
-            )
+            row_dict = {
+                "timestamp": self.time,
+                "unit_tag": unit.tag,
+                "unit_type": unit.type_id.name,
+                "player_id": owner,
+                "position_x": unit.position.x,
+                "position_y": unit.position.y,
+                "health": unit.health,
+                "shield": unit.shield,
+                "energy": unit.energy,
+                "build_progress": unit.build_progress,
+                "resource_remaining": unit.mineral_contents if unit.is_mineral_field  else (unit.vespene_contents if unit.is_vespene_geyser else 0),
+            }
+
+            if self.csv_writer is None:
+                if self.temp_file_path is None:
+                    logger.error("temp_file_path was not set in on_start.")
+                    return
+                self.temp_file = open(self.temp_file_path, "w", newline="")
+                self.csv_writer = csv.DictWriter(self.temp_file, fieldnames=row_dict.keys())
+                self.csv_writer.writeheader()
+
+                schema = {k: type(v).__name__ for k, v in row_dict.items()}
+                self.temp_schema_path = self.temp_file_path.with_suffix('.json')
+                with open(self.temp_schema_path, 'w') as f:
+                    json.dump(schema, f)
+            
+            self.csv_writer.writerow(row_dict)
+
+    def close(self):
+        if self.temp_file and not self.temp_file.closed:
+            self.temp_file.close()
 
     async def on_end(self, game_result):
         # This callback is unreliable when the game ends by reaching the end of a replay file.
+        self.close()
         pass
 
     async def on_unit_destroyed(self, unit_tag):
@@ -102,17 +130,52 @@ class ObserverBot(ObserverAI):
         pass
 
 def save_data_from_bot(bot: ObserverBot):
-    if not bot.unit_data:
+    if not bot.temp_file_path or not bot.temp_file_path.exists() or bot.temp_file_path.stat().st_size == 0:
         logger.warning(f"No unit data to write for POV = player {bot.observed_id} in replay '{Path(bot.replay_path).name}'. This may be due to an incorrect time window.")
+        if bot.temp_file_path and bot.temp_file_path.exists():
+            os.remove(bot.temp_file_path)
+        if bot.temp_schema_path and bot.temp_schema_path.exists():
+            os.remove(bot.temp_schema_path)
         return
+
+    # Read schema
+    schema = {}
+    if bot.temp_schema_path and bot.temp_schema_path.exists():
+        with open(bot.temp_schema_path, 'r') as f:
+            schema = json.load(f)
+
+    type_map = {'int': int, 'float': float, 'str': str}
 
     # Group data by player_id
     player_data = {}
-    for row in bot.unit_data:
-        player_id = row["player_id"]
-        if player_id not in player_data:
-            player_data[player_id] = []
-        player_data[player_id].append(row)
+    with open(bot.temp_file_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Convert types based on the schema
+            for key, type_str in schema.items():
+                if key in row and row[key]:
+                    target_type = type_map.get(type_str)
+                    if target_type:
+                        try:
+                            # Special handling for int conversion from float strings (e.g., "1.0")
+                            if target_type is int:
+                                row[key] = int(float(row[key]))
+                            else:
+                                row[key] = target_type(row[key])
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert '{row[key]}' to {type_str} for key '{key}'. Keeping as string.")
+                            pass
+            
+            player_id = row.get("player_id")
+            if player_id is not None:
+                if player_id not in player_data:
+                    player_data[player_id] = []
+                player_data[player_id].append(row)
+
+    # Clean up temporary files
+    os.remove(bot.temp_file_path)
+    if bot.temp_schema_path and bot.temp_schema_path.exists():
+        os.remove(bot.temp_schema_path)
 
     replay_name_parts = Path(bot.replay_path).stem.split("_")
     game_number = replay_name_parts[0]
@@ -158,7 +221,7 @@ async def process_perspective(replay_path, observed_id, port, base_build, data_v
                 realtime=False,
                 observed_id=observed_id
             )
-            await _play_replay(client, bot, realtime=False, player_id=observed_id)
+            await _play_replay(client, bot, realtime=False, player_id=observed_id) # pyright: ignore[reportGeneralTypeIssues]
     except ProtocolError as e:
         # This is expected when the replay ends.
         if "Game over" in str(e):
@@ -168,6 +231,7 @@ async def process_perspective(replay_path, observed_id, port, base_build, data_v
     except Exception as e:
         logger.error(f"Caught exception in process_perspective: {e}")
     finally:
+        bot.close()
         save_data_from_bot(bot)
 
 def process_perspective_wrapper(replay_path, observed_id, port, base_build, data_version, start_time, end_time, interval, placement=None):
@@ -186,6 +250,7 @@ def extract_replay(rpath, start_time, end_time, interval):
         # This is expected when the replay ends before the specified end_time.
         pass
     finally:
+        observer_1.close()
         save_data_from_bot(observer_1)
 
     # Get Player 2's perspective
@@ -196,6 +261,7 @@ def extract_replay(rpath, start_time, end_time, interval):
         # This is expected when the replay ends before the specified end_time.
         pass
     finally:
+        observer_2.close()
         save_data_from_bot(observer_2)
 
 if __name__ == "__main__":
