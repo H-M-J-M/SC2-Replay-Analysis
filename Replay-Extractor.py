@@ -408,11 +408,13 @@ if __name__ == "__main__":
         logger.info("No replays found or no new replays to process.")
     else:
         logger.info(f"Found {len(replay_paths_to_process)} replay(s) to process.")
-        print("\nTo halt batch early, create a file named 'STOP' in the project directory.")
         
         stop_file_path = Path("STOP")
 
-        for rp in replay_paths_to_process:
+        total_replays = len(replay_paths_to_process)
+        for i, rp in enumerate(replay_paths_to_process):
+            current_replay_number = i + 1
+            logger.info(f"Starting replay {current_replay_number}/{total_replays}")
             if stop_file_path.exists():
                 logger.info("'STOP' file detected. Aborting batch process.")
                 stop_file_path.unlink() # Clean up the stop file
@@ -424,6 +426,7 @@ if __name__ == "__main__":
                     logger.error(f"Replay file not found at path: {absolute_path}")
                     continue
                 
+                print("\nTo halt batch early, create a file named 'STOP' in the project directory.")
                 logger.info(f"Processing {absolute_path.name}...")
 
                 if args.single_thread:
