@@ -19,6 +19,8 @@ from sc2.client import Client
 
 from sc2.protocol import ProtocolError
 
+OUTPUT_DIR = Path("Output") #TODO Rename this directory to "OutputRaw". Other locations that reference it will need also need to be updated.
+REPLAY_DIR = Path("Replays")
 
 class ObserverBot(ObserverAI):
     def __init__(self, replay_path, observed_id, start_time=0, end_time=7200, interval=20):
@@ -29,7 +31,7 @@ class ObserverBot(ObserverAI):
         self.end_time = end_time
         self.interval = interval
 
-        self.output_dir = Path("Output")
+        self.output_dir = OUTPUT_DIR
         self.temp_file = None
         self.csv_writer = None
         self.temp_file_path = None
@@ -226,7 +228,7 @@ def save_data_from_bot(bot: ObserverBot):
         
         observer_name = player_1_name if bot.observed_id == 1 else player_2_name
 
-        output_dir = Path("Output") / game_number
+        output_dir = OUTPUT_DIR / game_number
         output_dir.mkdir(parents=True, exist_ok=True)
 
         for player_id, data in player_data.items():
@@ -268,7 +270,7 @@ def save_data_from_bot(bot: ObserverBot):
             map_name = "_".join(replay_name_parts[3:])
             
             observer_name = player_1_name if bot.observed_id == 1 else player_2_name
-            output_dir = Path("Output") / game_number
+            output_dir = OUTPUT_DIR / game_number
 
             output_filename = f"{game_number}_deaths_observed-by-{observer_name}_{map_name}.csv"
             output_file = output_dir / output_filename
@@ -366,7 +368,7 @@ if __name__ == "__main__":
             replay_path = Path(args.replay)
         # AIArena match ID
         elif args.replay.isdigit():
-            replays_dir = Path("Replays")
+            replays_dir = REPLAY_DIR
             if replays_dir.is_dir():
                 match_pattern = f"{args.replay}_*.SC2Replay"
                 found_files = list(replays_dir.glob(match_pattern))
@@ -376,7 +378,7 @@ if __name__ == "__main__":
                     logger.error(f"Multiple replays found for number '{args.replay}'. Please use a more specific name.")
         # Full filename
         elif ".SC2Replay" in args.replay:
-            replay_path = Path("Replays") / args.replay
+            replay_path = REPLAY_DIR / args.replay
         
         else:
             logger.warning(f"Invalid replay identifier: '{args.replay}'")
@@ -386,8 +388,8 @@ if __name__ == "__main__":
 
     else:
         # No replay specified, so analyze all new replays
-        replays_dir = Path("Replays")
-        output_dir = Path("Output")
+        replays_dir = REPLAY_DIR
+        output_dir = OUTPUT_DIR
         
         if not replays_dir.is_dir():
             logger.error("The 'Replays' directory was not found.")
