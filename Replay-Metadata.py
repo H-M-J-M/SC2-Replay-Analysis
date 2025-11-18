@@ -6,15 +6,33 @@ import argparse
 import re
 from loguru import logger
 
-def get_replay_info(replay_path: str | Path, output_path: Path | None = None):
-    with Path(replay_path).open("rb") as f:
+def get_replay_info(replay_path: Path, output_path: Path | None = None):
+    with replay_path.open("rb") as f:
         replay_data = f.read()
         replay_io = BytesIO()
         replay_io.write(replay_data)
         replay_io.seek(0)
         archive = mpyq.MPQArchive(replay_io).extract()
         metadata = json.loads(archive[b"replay.gamemetadata.json"].decode("utf-8")) # pyright: ignore[reportOptionalMemberAccess]
-        
+
+        # Extract player names from the filename (so we don't need to load the replay)
+        replay_name_parts = replay_path.stem.split("_")
+        if len(replay_name_parts) >= 3: # Expecting at least GameNumber_Player1Name_Player2Name_Map
+            player1_name = replay_name_parts[1]
+            player2_name = replay_name_parts[2]
+
+            player_names_map = {
+                1: player1_name,
+                2: player2_name
+            }
+
+            for player_meta in metadata['Players']:
+                player_id = player_meta['PlayerID']
+                if player_id in player_names_map:
+                    player_meta['PlayerName'] = player_names_map[player_id]
+        else:
+            logger.warning(f"Could not parse player names from filename: {replay_path.name}. Expected format: GameNumber_Player1Name_Player2Name_MapName.SC2Replay")
+
         if output_path:
             with open(output_path, "w") as out_f:
                 json.dump(metadata, out_f, indent=4)
@@ -30,6 +48,7 @@ if __name__ == "__main__":
 
     parser.add_argument("replay", nargs='?', default=None, type=str, help="The replay number, filename, or full path. If omitted, all new replays will be processed.")
     parser.add_argument("--no-file", help="Do not write output to a file, print to console instead.", action="store_true")
+    parser.add_argument("--regen", help="Force regeneration of metadata for all specified replays, even if it already exists.", action="store_true")
     args = parser.parse_args()
 
     replay_paths_to_process = []
@@ -77,6 +96,7 @@ if __name__ == "__main__":
         logger.info("No replays found or no new replays to process.")
     else:
         logger.info(f"Found {len(replay_paths_to_process)} replay(s) to process.")
+        skipped_count = 0
         
         for rp in replay_paths_to_process:
             try:
@@ -90,12 +110,20 @@ if __name__ == "__main__":
                     match = re.search(r"^(\d+)_", absolute_path.name)
                     if match:
                         game_num = match.group(1)
-                        output_dir = Path("Output") / game_num
+                        output_dir = Path("OutputRaw") / game_num
                         output_dir.mkdir(parents=True, exist_ok=True)
                         output_path = output_dir / f"{game_num}_info.json"
+
+                if not args.regen and output_path and output_path.is_file():
+                    logger.debug(f"Metadata for {absolute_path.name} already exists, skipping.")
+                    skipped_count += 1
+                    continue
 
                 logger.info(f"Processing {absolute_path.name}...")
                 get_replay_info(absolute_path, output_path)
 
             except Exception as e:
                 logger.error(f"Failed to process replay {rp.name}. Error: {e}")
+        
+        if skipped_count > 0:
+            logger.info(f"Skipped {skipped_count} replays that were already processed.")

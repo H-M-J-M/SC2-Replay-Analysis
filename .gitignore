@@ -1,8 +1,22 @@
 .vscode
 .vscode/*
 
-Output/*
-Replays/*
+Output/
+OutputRaw/
+Replays/
+OutputFeatures/
+FeatureScript/
+FeatureLibrary/
+OutputModels/*.txt
+OutputVisualizations/*.png
 
-test.py
 *.log
+__pycache__/
+*.pyc
+
+
+#Project dev testing code
+test.py
+rename_data_files.py
+*.ps1
+!predict_winner_20251118-210828.txt
